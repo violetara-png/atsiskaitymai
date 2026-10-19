@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mokytojos prieiga — Atsiskaitymai</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div id="lock" class="lock-screen">
+  <h2>🔒 Mokytojos prieiga</h2>
+  <p class="help-text">Įvesk slaptažodį, kad tvarkytum savaitės atsiskaitymus.</p>
+  <input type="password" id="pwd" placeholder="Slaptažodis" style="width:100%; margin-bottom:10px;">
+  <button class="btn-primary" id="unlock-btn" style="width:100%;">Prisijungti</button>
+</div>
+
+<div id="app" style="display:none;">
+  <header class="site-header">
+    <h1>🛠️ Mokytojos panelė</h1>
+    <p>Pridėk, redaguok, paskelbk / paslėpk arba ištrink savaitės medžiagą</p>
+  </header>
+
+  <main>
+
+    <div class="admin-panel">
+      <h2>🔑 GitHub prieiga</h2>
+      <p class="help-text">Reikia vieną kartą, kad pakeitimai galėtų įsirašyti į svetainę. Token'as saugomas TIK šioje naršyklėje.</p>
+      <div class="form-grid">
+        <label>Personal access token (repo scope)
+          <input type="password" id="gh-token" placeholder="ghp_...">
+        </label>
+      </div>
+      <button class="btn-ghost btn-sm" id="save-token-btn">Išsaugoti token'ą</button>
+      <span id="token-status" class="help-text" style="margin-left:8px;"></span>
+    </div>
+
+    <div class="admin-panel">
+      <h2 id="form-title">➕ Pridėti nuorodą</h2>
+      <div class="form-grid">
+        <label>Pavadinimas
+          <input type="text" id="f-pavadinimas" placeholder="pvz. Laipsnio savybės — atsiskaitymas">
+        </label>
+        <label>Tipas
+          <select id="f-tipas">
+            <option value="atsiskaitymas">🧪 Atsiskaitymo testas</option>
+            <option value="treniruoklis">🏋️ Treniruoklis</option>
+            <option value="isivertinimas">✅ Įsivertinimas</option>
+          </select>
+        </label>
+        <label>Klasė
+          <select id="f-klase">
+            <option value="visos">Visoms klasėms</option>
+          </select>
+        </label>
+        <label>Savaitė (pirmadienis)
+          <input type="date" id="f-savaite">
+        </label>
+        <label>Nuoroda (URL)
+          <input type="url" id="f-url" placeholder="https://...">
+        </label>
+      </div>
+      <div class="actions">
+        <button class="btn-primary" id="save-item-btn">Pridėti nuorodą</button>
+        <button class="btn-ghost" id="cancel-edit-btn" style="display:none;">Atšaukti redagavimą</button>
+      </div>
+    </div>
+
+    <div class="admin-panel">
+      <h2>📋 Visa medžiaga</h2>
+      <div class="toolbar">
+        <select id="klase-filter">
+          <option value="">Visos klasės</option>
+        </select>
+      </div>
+      <div id="list"><p class="empty-state">Kraunama…</p></div>
+    </div>
+
+    <div class="admin-panel">
+      <h2>📊 Mokinių rezultatai (Google Sheets)</h2>
+      <p class="help-text">Atsiskaitymų pažymiai pildomi per /classtime arba /github-vertinimai skill'us.</p>
+      <div class="sheets-grid" id="sheets-grid"></div>
+    </div>
+
+  </main>
+</div>
+
+<script src="assets/shared.js"></script>
+<script>
+const ADMIN_PASSWORD = "violeta2026";
+let MANIFEST_SHA = null;
+let ALL_ITEMS = [];
+let EDIT_ID = null;
+
+// ---------- užraktas ----------
+function tryUnlock() {
+  const val = document.getElementById("pwd").value;
+  if (val === ADMIN_PASSWORD) {
+    localStorage.setItem("admin_unlocked", "1");
+    showApp();
+  } else {
+    showToast("Neteisingas slaptažodis", true);
+  }
+}
+document.getElementById("unlock-btn").addEventListener("click", tryUnlock);
+document.getElementById("pwd").addEventListener("keydown", e => { if (e.key === "Enter") tryUnlock(); });
+
+function showApp() {
+  document.getElementById("lock").style.display = "none";
+  document.getElementById("app").style.display = "block";
+  initApp();
+}
+
+if (localStorage.getItem("admin_unlocked") === "1") showApp();
+
+// ---------- GitHub token ----------
+function getToken() { return localStorage.getItem("gh_token") || ""; }
+
+document.getElementById("save-token-btn").addEventListener("click", () => {
+  const t = document.getElementById("gh-token").value.trim();
+  if (t) {
+    localStorage.setItem("gh_token", t);
+    document.getElementById("gh-token").value = "";
+    showToast("Token'as išsaugotas");
+  }
+  updateTokenStatus();
+});
+
+function updateTokenStatus() {
+  const el = document.getElementById("token-status");
+  el.textContent = getToken() ? "✅ Token'as įrašytas" : "⚠️ Token'o dar nėra — pakeitimai neįsirašys";
+}
+
+// ---------- GitHub Contents API ----------
+async function ghGetManifest() {
+  const res = await fetch(
+    `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${MANIFEST_PATH}?ref=${GH_BRANCH}&t=${Date.now()}`,
+    { headers: { Authorization: `token ${getToken()}` } }
+  );
+  if (!res.ok) throw new Error("Nepavyko gauti manifest.json (patikrink token'ą)");
+  const data = await res.json();
+  MANIFEST_SHA = data.sha;
+  const decoded = decodeURIComponent(escape(atob(data.content)));
+  return JSON.parse(decoded);
+}
+
+async function ghSaveManifest(obj, message) {
+  const content = btoa(unescape(encodeURIComponent(JSON.stringify(obj, null, 2))));
+  const res = await fetch(
+    `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${MANIFEST_PATH}`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `token ${getToken()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message: message,
+        content: content,
+        sha: MANIFEST_SHA,
+        branch: GH_BRANCH,
+      }),
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error("Nepavyko išsaugoti: " + (err.message || res.status));
+  }
+  const data = await res.json();
+  MANIFEST_SHA = data.content.sha;
+}
+
+// ---------- forma ----------
+function mondayOfThisWeek() {
+  const d = new Date();
+  const day = d.getDay() || 7;
+  if (day !== 1) d.setDate(d.getDate() - day + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function resetForm() {
+  EDIT_ID = null;
+  document.getElementById("form-title").textContent = "➕ Pridėti nuorodą";
+  document.getElementById("f-pavadinimas").value = "";
+  document.getElementById("f-tipas").value = "atsiskaitymas";
+  document.getElementById("f-klase").value = KLASES[0];
+  document.getElementById("f-savaite").value = mondayOfThisWeek();
+  document.getElementById("f-url").value = "";
+  document.getElementById("save-item-btn").textContent = "Pridėti nuorodą";
+  document.getElementById("cancel-edit-btn").style.display = "none";
+}
+
+function fillFormForEdit(item) {
+  EDIT_ID = item.id;
+  document.getElementById("form-title").textContent = "✏️ Redaguoti";
+  document.getElementById("f-pavadinimas").value = item.pavadinimas;
+  document.getElementById("f-tipas").value = item.tipas;
+  document.getElementById("f-klase").value = item.klase;
+  document.getElementById("f-savaite").value = item.savaite;
+  document.getElementById("f-url").value = item.url;
+  document.getElementById("save-item-btn").textContent = "Išsaugoti pakeitimus";
+  document.getElementById("cancel-edit-btn").style.display = "inline-block";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+document.getElementById("cancel-edit-btn").addEventListener("click", resetForm);
+
+document.getElementById("save-item-btn").addEventListener("click", async () => {
+  if (!getToken()) { showToast("Pirma įrašyk GitHub token'ą", true); return; }
+  const pavadinimas = document.getElementById("f-pavadinimas").value.trim();
+  const url = document.getElementById("f-url").value.trim();
+  const savaite = document.getElementById("f-savaite").value;
+  if (!pavadinimas || !url || !savaite) { showToast("Užpildyk pavadinimą, nuorodą ir savaitę", true); return; }
+
+  const payload = {
+    tipas: document.getElementById("f-tipas").value,
+    klase: document.getElementById("f-klase").value,
+    savaite: savaite,
+    pavadinimas: pavadinimas,
+    url: url,
+  };
+
+  try {
+    const manifest = await ghGetManifest();
+    if (EDIT_ID) {
+      const idx = manifest.items.findIndex(it => it.id === EDIT_ID);
+      if (idx >= 0) manifest.items[idx] = { ...manifest.items[idx], ...payload };
+      await ghSaveManifest(manifest, `Redaguota: ${pavadinimas}`);
+      showToast("Pakeitimai išsaugoti");
+    } else {
+      manifest.items.push({
+        id: crypto.randomUUID(),
+        ...payload,
+        busena: "paskelbta",
+        sukurta: new Date().toISOString(),
+      });
+      await ghSaveManifest(manifest, `Pridėta: ${pavadinimas}`);
+      showToast("Pridėta ir paskelbta");
+    }
+    resetForm();
+    await loadAndRenderList();
+  } catch (e) {
+    showToast(e.message, true);
+  }
+});
+
+// ---------- sąrašas ----------
+async function loadAndRenderList() {
+  try {
+    const manifest = await ghGetManifest();
+    ALL_ITEMS = manifest.items || [];
+    renderList();
+  } catch (e) {
+    document.getElementById("list").innerHTML = `<p class="empty-state">${e.message}</p>`;
+  }
+}
+
+function renderList() {
+  const klaseSel = document.getElementById("klase-filter").value;
+  const list = document.getElementById("list");
+  let items = [...ALL_ITEMS].sort((a, b) => b.savaite.localeCompare(a.savaite));
+  if (klaseSel) items = items.filter(it => it.klase === klaseSel);
+
+  if (!items.length) {
+    list.innerHTML = `<p class="empty-state">Nieko nerasta.</p>`;
+    return;
+  }
+
+  list.innerHTML = items.map(it => {
+    const tipas = TIPAI[it.tipas] || { label: it.tipas, emoji: "📄", badge: "" };
+    const paskelbta = it.busena === "paskelbta";
+    const statusBadge = paskelbta
+      ? `<span class="badge badge-isivertinimas">Paskelbta</span>`
+      : `<span class="badge badge-hidden">Paslėpta</span>`;
+    return `
+      <div class="item-card">
+        <div class="item-info">
+          <span class="badge ${tipas.badge}">${tipas.emoji} ${tipas.label}</span>
+          <span class="item-name"><a href="${it.url}" target="_blank" rel="noopener">${it.pavadinimas}</a></span>
+          <span class="item-meta">${it.klase.toUpperCase()} · ${fmtDataLt(it.savaite)}</span>
+          ${statusBadge}
+        </div>
+        <div class="actions">
+          <button class="btn-ghost btn-sm" onclick="editItem('${it.id}')">Redaguoti</button>
+          <button class="btn-ghost btn-sm" onclick="toggleItem('${it.id}')">${paskelbta ? "Paslėpti" : "Paskelbti"}</button>
+          <button class="btn-danger btn-sm" onclick="deleteItem('${it.id}')">Ištrinti</button>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+function editItem(id) {
+  const item = ALL_ITEMS.find(it => it.id === id);
+  if (item) fillFormForEdit(item);
+}
+
+async function toggleItem(id) {
+  if (!getToken()) { showToast("Pirma įrašyk GitHub token'ą", true); return; }
+  try {
+    const manifest = await ghGetManifest();
+    const item = manifest.items.find(it => it.id === id);
+    if (!item) return;
+    item.busena = item.busena === "paskelbta" ? "paslepta" : "paskelbta";
+    await ghSaveManifest(manifest, `${item.busena === "paskelbta" ? "Paskelbta" : "Paslėpta"}: ${item.pavadinimas}`);
+    showToast(item.busena === "paskelbta" ? "Paskelbta mokiniams" : "Paslėpta nuo mokinių");
+    await loadAndRenderList();
+  } catch (e) {
+    showToast(e.message, true);
+  }
+}
+
+async function deleteItem(id) {
+  if (!getToken()) { showToast("Pirma įrašyk GitHub token'ą", true); return; }
+  const item = ALL_ITEMS.find(it => it.id === id);
+  if (!item || !confirm(`Ištrinti „${item.pavadinimas}"? Šio veiksmo atšaukti negalėsi.`)) return;
+  try {
+    const manifest = await ghGetManifest();
+    manifest.items = manifest.items.filter(it => it.id !== id);
+    await ghSaveManifest(manifest, `Ištrinta: ${item.pavadinimas}`);
+    showToast("Ištrinta");
+    await loadAndRenderList();
+  } catch (e) {
+    showToast(e.message, true);
+  }
+}
+
+// ---------- init ----------
+function initApp() {
+  updateTokenStatus();
+
+  const fKlase = document.getElementById("f-klase");
+  const filterKlase = document.getElementById("klase-filter");
+  for (const k of KLASES) {
+    const o1 = document.createElement("option");
+    o1.value = k; o1.textContent = k.toUpperCase();
+    fKlase.appendChild(o1);
+    const o2 = document.createElement("option");
+    o2.value = k; o2.textContent = k.toUpperCase() + " klasė";
+    filterKlase.appendChild(o2);
+  }
+  const visosOpt = document.createElement("option");
+  visosOpt.value = "visos"; visosOpt.textContent = "Visoms klasėms";
+  fKlase.appendChild(visosOpt);
+
+  filterKlase.addEventListener("change", renderList);
+
+  resetForm();
+  loadAndRenderList();
+
+  const sheetsGrid = document.getElementById("sheets-grid");
+  sheetsGrid.innerHTML = Object.entries(SHEETS).map(([klase, id]) =>
+    `<a href="https://docs.google.com/spreadsheets/d/${id}/edit" target="_blank" rel="noopener">${klase.toUpperCase()}</a>`
+  ).join("");
+}
+</script>
+
+</body>
+</html>

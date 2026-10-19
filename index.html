@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mokyklos atsiskaitymai — Mokytoja Violeta</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <h1>📅 Savaitės atsiskaitymai, treniruokliai, įsivertinimai</h1>
+  <p>Anykščių A. Vienuolio progimnazija · mokytoja Violeta</p>
+</header>
+
+<main>
+  <div class="toolbar">
+    <label for="klase-filter" style="font-weight:600; font-size:0.9rem;">Klasė:</label>
+    <select id="klase-filter">
+      <option value="">Visos klasės</option>
+    </select>
+  </div>
+
+  <div id="content">
+    <p class="empty-state">Kraunama…</p>
+  </div>
+</main>
+
+<footer>
+  <a href="admin.html" style="color:inherit;">mokytojos prieiga</a>
+</footer>
+
+<script src="assets/shared.js"></script>
+<script>
+let ALL_ITEMS = [];
+
+function render() {
+  const klaseSel = document.getElementById("klase-filter").value;
+  const content = document.getElementById("content");
+
+  const visible = ALL_ITEMS.filter(it => it.busena === "paskelbta");
+  const filtered = klaseSel
+    ? visible.filter(it => it.klase === klaseSel || it.klase === "visos")
+    : visible;
+
+  if (!filtered.length) {
+    content.innerHTML = `<p class="empty-state">Kol kas nieko nepaskelbta${klaseSel ? " " + klaseSel.toUpperCase() + " klasei" : ""}.</p>`;
+    return;
+  }
+
+  const grouped = groupByWeekAndClass(filtered);
+  const savaites = Object.keys(grouped).sort().reverse();
+
+  let html = "";
+  for (const savaite of savaites) {
+    html += `<div class="week-group"><h2 class="week-title">🗓️ ${savaitesEtikete(savaite)}</h2>`;
+    const klasesSiojeSavaiteje = Object.keys(grouped[savaite]).sort();
+    for (const klase of klasesSiojeSavaiteje) {
+      const label = klase === "visos" ? "Visoms klasėms" : klase.toUpperCase() + " klasė";
+      html += `<div class="class-group"><p class="class-title">${label}</p>`;
+      for (const it of grouped[savaite][klase]) {
+        const tipas = TIPAI[it.tipas] || { label: it.tipas, emoji: "📄", badge: "" };
+        html += `
+          <div class="item-card">
+            <div class="item-info">
+              <span class="badge ${tipas.badge}">${tipas.emoji} ${tipas.label}</span>
+              <span class="item-name"><a href="${it.url}" target="_blank" rel="noopener">${it.pavadinimas}</a></span>
+            </div>
+          </div>`;
+      }
+      html += `</div>`;
+    }
+    html += `</div>`;
+  }
+  content.innerHTML = html;
+}
+
+async function init() {
+  const sel = document.getElementById("klase-filter");
+  for (const k of KLASES) {
+    const opt = document.createElement("option");
+    opt.value = k;
+    opt.textContent = k.toUpperCase() + " klasė";
+    sel.appendChild(opt);
+  }
+  sel.addEventListener("change", render);
+
+  const saved = localStorage.getItem("pasirinkta_klase");
+  if (saved) sel.value = saved;
+  sel.addEventListener("change", () => localStorage.setItem("pasirinkta_klase", sel.value));
+
+  try {
+    const data = await fetchManifest();
+    ALL_ITEMS = data.items || [];
+    render();
+  } catch (e) {
+    document.getElementById("content").innerHTML =
+      `<p class="empty-state">Nepavyko įkelti sąrašo. Pabandyk perkrauti puslapį.</p>`;
+  }
+}
+
+init();
+</script>
+
+</body>
+</html>
