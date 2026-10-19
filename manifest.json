@@ -1,14 +1,3 @@
 {
-  "items": [
-    {
-      "id": "test-ci-12345",
-      "tipas": "atsiskaitymas",
-      "klase": "6a",
-      "savaite": "2026-10-19",
-      "pavadinimas": "Bandomasis įrašas: šaknys, ąžuolas, žąsis",
-      "url": "https://example.com/test.html",
-      "busena": "paskelbta",
-      "sukurta": "2026-10-19T00:00:00Z"
-    }
-  ]
+  "items": []
 }
