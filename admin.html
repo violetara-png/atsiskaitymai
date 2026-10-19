@@ -75,8 +75,23 @@
     </div>
 
     <div class="admin-panel">
-      <h2>📊 Mokinių rezultatai (Google Sheets)</h2>
-      <p class="help-text">Atsiskaitymų pažymiai pildomi per /classtime arba /github-vertinimai skill'us.</p>
+      <h2>📊 Mokinių rezultatai</h2>
+      <p class="help-text">Pažymiai pildomi per /classtime arba /github-vertinimai skill'us — čia tik skaitymui.</p>
+      <div class="toolbar">
+        <select id="r-klase">
+          <option value="">Visos klasės</option>
+        </select>
+        <select id="r-data">
+          <option value="">Visos datos</option>
+        </select>
+        <select id="r-darbas">
+          <option value="">Visi darbai</option>
+        </select>
+        <input type="text" id="r-mokinys" placeholder="Mokinys (vardas/pavardė)">
+        <button class="btn-ghost btn-sm" id="r-refresh-btn">🔄 Atnaujinti</button>
+      </div>
+      <div id="rezultatai-list"><p class="empty-state">Kraunama…</p></div>
+      <p class="help-text" style="margin-top:12px;">Pilnos lentelės:</p>
       <div class="sheets-grid" id="sheets-grid"></div>
     </div>
 
@@ -349,6 +364,92 @@ function initApp() {
   sheetsGrid.innerHTML = Object.entries(SHEETS).map(([klase, id]) =>
     `<a href="https://docs.google.com/spreadsheets/d/${id}/edit" target="_blank" rel="noopener">${klase.toUpperCase()}</a>`
   ).join("");
+
+  const rKlase = document.getElementById("r-klase");
+  for (const k of KLASES) {
+    const o = document.createElement("option");
+    o.value = k; o.textContent = k.toUpperCase();
+    rKlase.appendChild(o);
+  }
+  ["r-klase", "r-data", "r-darbas"].forEach(id =>
+    document.getElementById(id).addEventListener("change", renderRezultatai)
+  );
+  document.getElementById("r-mokinys").addEventListener("input", renderRezultatai);
+  document.getElementById("r-refresh-btn").addEventListener("click", loadRezultatai);
+
+  loadRezultatai();
+}
+
+// ---------- rezultatai (skaitymui iš Google Sheets, CSV eksportas) ----------
+let ALL_REZULTATAI = [];
+
+async function loadRezultatai() {
+  const list = document.getElementById("rezultatai-list");
+  list.innerHTML = `<p class="empty-state">Kraunama…</p>`;
+  try {
+    const perKlase = await Promise.all(KLASES.map(k => fetchKlasesRezultatai(k)));
+    ALL_REZULTATAI = perKlase.flat();
+
+    const dataSel = document.getElementById("r-data");
+    const darbasSel = document.getElementById("r-darbas");
+    const datos = [...new Set(ALL_REZULTATAI.map(r => r.data))].sort().reverse();
+    const darbai = [...new Set(ALL_REZULTATAI.map(r => r.darbas))].sort();
+    dataSel.innerHTML = `<option value="">Visos datos</option>` +
+      datos.map(d => `<option value="${d}">${fmtDataLt(d)}</option>`).join("");
+    darbasSel.innerHTML = `<option value="">Visi darbai</option>` +
+      darbai.map(d => `<option value="${d}">${d}</option>`).join("");
+
+    renderRezultatai();
+  } catch (e) {
+    list.innerHTML = `<p class="empty-state">${e.message}</p>`;
+  }
+}
+
+function renderRezultatai() {
+  const klase = document.getElementById("r-klase").value;
+  const data = document.getElementById("r-data").value;
+  const darbas = document.getElementById("r-darbas").value;
+  const mokinys = document.getElementById("r-mokinys").value.trim().toLowerCase();
+
+  let rows = ALL_REZULTATAI;
+  if (klase) rows = rows.filter(r => r.klase === klase);
+  if (data) rows = rows.filter(r => r.data === data);
+  if (darbas) rows = rows.filter(r => r.darbas === darbas);
+  if (mokinys) rows = rows.filter(r => r.mokinys.toLowerCase().includes(mokinys));
+
+  rows = [...rows].sort((a, b) => b.data.localeCompare(a.data) || a.klase.localeCompare(b.klase) || a.mokinys.localeCompare(b.mokinys));
+
+  const list = document.getElementById("rezultatai-list");
+  if (!rows.length) {
+    list.innerHTML = `<p class="empty-state">Pagal šiuos filtrus rezultatų nerasta.</p>`;
+    return;
+  }
+
+  list.innerHTML = `
+    <div style="overflow-x:auto;">
+    <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+      <thead>
+        <tr style="text-align:left; border-bottom:2px solid var(--gray-200);">
+          <th style="padding:6px 8px;">Data</th>
+          <th style="padding:6px 8px;">Klasė</th>
+          <th style="padding:6px 8px;">Darbas</th>
+          <th style="padding:6px 8px;">Mokinys</th>
+          <th style="padding:6px 8px;">Pažymys</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr style="border-bottom:1px solid var(--gray-100);">
+            <td style="padding:6px 8px; white-space:nowrap;">${fmtDataLt(r.data)}</td>
+            <td style="padding:6px 8px;">${r.klase.toUpperCase()}</td>
+            <td style="padding:6px 8px;">${r.darbas}</td>
+            <td style="padding:6px 8px;">${r.mokinys}</td>
+            <td style="padding:6px 8px; font-weight:700;">${r.pazymys}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+    </div>
+    <p class="help-text" style="margin-top:8px;">${rows.length} įrašas(ai)</p>`;
 }
 </script>
 

@@ -21,6 +21,73 @@ const SHEETS = {
   "8b": "1KDcV0lXIOXWT_G71XsusG-7Nep2q0Z9XEnEXxWwN_lc",
 };
 
+// Kiekvieno Sheet "Vertinimai" lakšto gid (reikalingas CSV eksportui)
+const SHEET_GIDS = {
+  "6a": 1336308848,
+  "6b": 447645626,
+  "7a": 612368818,
+  "7b": 1913046113,
+  "8b": 1271389423,
+};
+
+// Minimalus RFC4180 CSV parseris (tvarko kabutėse esančius kablelius)
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ",") {
+      row.push(field); field = "";
+    } else if (c === "\r") {
+      // praleidžiam
+    } else if (c === "\n") {
+      row.push(field); rows.push(row); row = []; field = "";
+    } else {
+      field += c;
+    }
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+// Sheet struktūra: 1 eil.=datos, 2 eil.=darbų pavadinimai, 3 eil.=antraštės, 4+=mokiniai
+// (žr. memory: mokyklos-atsiskaitymu-sheets). Grąžina plokščią įrašų sąrašą vienai klasei.
+async function fetchKlasesRezultatai(klase) {
+  const gid = SHEET_GIDS[klase];
+  const url = `https://docs.google.com/spreadsheets/d/${SHEETS[klase]}/export?format=csv&gid=${gid}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Nepavyko gauti ${klase.toUpperCase()} rezultatų`);
+  const rows = parseCsv(await res.text());
+  if (rows.length < 4) return [];
+  const datos = rows[0];
+  const darbai = rows[1];
+  const records = [];
+  for (let r = 3; r < rows.length; r++) {
+    const row = rows[r];
+    const vardas = (row[1] || "").trim();
+    if (!vardas) continue;
+    for (let c = 2; c < row.length; c++) {
+      const pazymys = (row[c] || "").trim();
+      if (!pazymys) continue;
+      records.push({
+        klase,
+        mokinys: vardas,
+        data: (datos[c] || "").trim(),
+        darbas: (darbai[c] || "").trim(),
+        pazymys,
+      });
+    }
+  }
+  return records;
+}
+
 // mmmm-mm-dd (ISO be laiko) -> "spalio 19 d." formatas
 function fmtDataLt(iso) {
   const menesiai = [
