@@ -27,8 +27,12 @@ function fmtDataLt(iso) {
     "sausio", "vasario", "kovo", "balandžio", "gegužės", "birželio",
     "liepos", "rugpjūčio", "rugsėjo", "spalio", "lapkričio", "gruodžio",
   ];
-  const [y, m, d] = iso.split("-").map(Number);
+  const [, m, d] = iso.split("-").map(Number);
   return `${d} ${menesiai[m - 1]} d.`;
+}
+
+function toLocalIso(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 // savaitės pradžios (pirmadienio) data savaitės antraštei
@@ -36,7 +40,7 @@ function savaitesEtikete(iso) {
   const d = new Date(iso + "T00:00:00");
   const pabaiga = new Date(d);
   pabaiga.setDate(d.getDate() + 4); // penktadienis
-  return `${fmtDataLt(iso)} – ${fmtDataLt(pabaiga.toISOString().slice(0, 10))} savaitė`;
+  return `${fmtDataLt(iso)} – ${fmtDataLt(toLocalIso(pabaiga))} savaitė`;
 }
 
 async function fetchManifest() {

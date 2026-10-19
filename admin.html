@@ -173,7 +173,7 @@ function mondayOfThisWeek() {
   const d = new Date();
   const day = d.getDay() || 7;
   if (day !== 1) d.setDate(d.getDate() - day + 1);
-  return d.toISOString().slice(0, 10);
+  return toLocalIso(d);
 }
 
 function resetForm() {
